@@ -1,0 +1,71 @@
+[
+    {
+        "camera_id": "camera-1",
+        "name": "1号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-2",
+        "name": "2号采区巷道",
+        "location": "辅井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-3",
+        "name": "3号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-4",
+        "name": "4号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-5",
+        "name": "5号井口监控",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-6",
+        "name": "6号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-7",
+        "name": "7号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-8",
+        "name": "8号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-9",
+        "name": "9号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    },
+    {
+        "camera_id": "camera-10",
+        "name": "10号井口监控",
+        "location": "主井口",
+        "lut_path": "app/lut/mapping_lut_1.npy",
+        "status": "online"
+    }
+]

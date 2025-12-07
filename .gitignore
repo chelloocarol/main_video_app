@@ -1,0 +1,27 @@
+﻿# Python venv（虚拟环境）
+videoapp/
+venv/
+.env/
+
+# PyInstaller 打包产物
+dist/
+build/
+*.spec
+*.exe
+
+# 视频
+*.mp4
+
+# 前端构建产物
+frontend/dist/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 日志
+*.log
+logs/
+
+# 交付文件夹
+system_build/

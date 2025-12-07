@@ -1,0 +1,25 @@
+{
+  "enhancement": {
+    "lut_strength": 0.8,
+    "gamma": 1.2,
+    "clahe_clip_limit": 2.0,
+    "clahe_tile_grid_size": [
+      8,
+      8
+    ]
+  },
+  "video": {
+    "default_resolution": "1920x1080",
+    "frame_rate": 30,
+    "quality": "high"
+  },
+  "system": {
+    "auto_start": false,
+    "save_logs": true,
+    "log_level": "info"
+  },
+  "notification": {
+    "enable_email": false,
+    "enable_sound": true
+  }
+}
