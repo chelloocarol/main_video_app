@@ -25,3 +25,7 @@ logs/
 
 # 交付文件夹
 system_build/
+
+# 前端依赖
+frontend/node_modules/
+node_modules/

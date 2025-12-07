@@ -99,6 +99,9 @@ app = FastAPI(title="Mine Video Enhancement Backend")
 app.state = SimpleNamespace()
 app.add_middleware(ErrorLoggerMiddleware)
 
+# 确定前端资源目录，若缺失则直接抛错避免半启动状态
+DIST_DIR = resolve_dist_path()
+
 
 
 # 适配 PyInstaller 的 _MEIPASS 临时目录
