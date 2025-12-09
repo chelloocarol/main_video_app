@@ -28,6 +28,8 @@ export interface VideoStreamUrl {
 export interface EnhancementStatus {
   is_running: boolean;
   camera_id?: string;
+  fps?: number;
+  params?: Record<string, any> | null;
   start_time?: string;
 }
 

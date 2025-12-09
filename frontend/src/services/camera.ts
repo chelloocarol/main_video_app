@@ -39,8 +39,11 @@ export interface CameraStream {
 export interface EnhancementStatus {
   is_running: boolean;
   camera_id: string;
+  fps?: number;
+  params?: Record<string, any> | null;
   start_time?: string;
 }
+
 
 /**
  * 获取所有摄像头列表

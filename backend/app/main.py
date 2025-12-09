@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from types import SimpleNamespace
+from pathlib import Path
+import shutil
 import logging
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
@@ -94,6 +96,80 @@ class ErrorLoggerMiddleware(BaseHTTPMiddleware):
                 }
             )
 
+def resolve_dist_path() -> Path:
+    """返回前端 dist 目录，支持多重回退并在缺失时抛错。"""
+
+    candidates = []
+    seen = set()
+
+    def add_candidate(path_like):
+        if not path_like:
+            return
+        p = Path(path_like)
+        key = str(p.resolve())
+        if key not in seen:
+            seen.add(key)
+            candidates.append(p)
+
+    # 1. 明确指定的环境变量优先
+    add_candidate(os.getenv("FRONTEND_DIST"))
+
+    # 2. PyInstaller `_MEIPASS` 路径
+    if hasattr(sys, "_MEIPASS"):
+        base_meipass = Path(sys._MEIPASS)
+        add_candidate(base_meipass / "frontend" / "dist")
+        add_candidate(base_meipass / "dist")
+
+    # 2.1. 可执行文件同级（适配 PyInstaller 单文件模式解压到同级目录）
+    exe_dir = Path(sys.executable).resolve().parent
+    add_candidate(exe_dir / "frontend" / "dist")
+    add_candidate(exe_dir / "dist")
+
+    # 3. 源码/开发模式路径
+    current_dir = Path(__file__).resolve()
+    project_root = current_dir.parent.parent.parent  # /workspace/main_video_app
+    backend_root = current_dir.parent.parent         # /workspace/main_video_app/backend
+    add_candidate(project_root / "frontend" / "dist")
+    add_candidate(backend_root / "frontend" / "dist")
+
+    print("🔍 尝试定位前端 dist 目录，候选列表：")
+    for c in candidates:
+        print(" -", c)
+
+    for path in candidates:
+        if path and path.exists() and path.is_dir():
+            index_file = path / "index.html"
+            if index_file.exists():
+                print(f"✅ 成功定位 dist 目录: {path}")
+                return path
+            else:
+                print(f"⚠️ 发现目录 {path} 但缺少 index.html")
+
+    raise RuntimeError("前端 dist 目录不存在，请确认已构建前端或在 PyInstaller 包内包含资源。")
+
+
+def validate_runtime_dependencies(raise_on_missing: bool = True):
+    """在启动前校验关键依赖，缺失时可选择中止启动（默认）。"""
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        message = "❌ 未找到 ffmpeg，可执行文件缺失将导致视频管道无法启动。"
+        print(message)
+        if raise_on_missing:
+            raise RuntimeError(message)
+    else:
+        print(f"✅ ffmpeg 路径: {ffmpeg_path}")
+
+    try:
+        import cv2  # noqa: F401
+        print("✅ OpenCV 模块可用")
+    except Exception as exc:  # pragma: no cover - 仅启动检查
+        message = f"❌ OpenCV 加载失败: {exc}"
+        print(message)
+        if raise_on_missing:
+            raise RuntimeError(message)
+
+
 # 初始化 FastAPI
 app = FastAPI(title="Mine Video Enhancement Backend")
 app.state = SimpleNamespace()
@@ -102,26 +178,12 @@ app.add_middleware(ErrorLoggerMiddleware)
 # 确定前端资源目录，若缺失则直接抛错避免半启动状态
 DIST_DIR = resolve_dist_path()
 
+# 挂载静态资源到 /static，避免与 API/Fallback 冲突
+app.mount("/static", StaticFiles(directory=DIST_DIR, html=False), name="frontend-static")
 
-
-# 适配 PyInstaller 的 _MEIPASS 临时目录
-if hasattr(sys, "_MEIPASS"):
-    BASE_PATH = sys._MEIPASS
-else:
-    BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-
-# 尝试从 PyInstaller 打包路径中寻找 dist
-DIST_DIR = os.path.join(BASE_PATH, "frontend", "dist")
-
-print("🔍 静态资源路径识别为:", DIST_DIR)
-
-if not os.path.exists(DIST_DIR):
-    print("❌ 前端 dist 目录不存在:", DIST_DIR)
-else:
-    print("✅ 成功加载前端 dist:", DIST_DIR)
-
-# 挂载静态资源
-app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="frontend")
+assets_dir = DIST_DIR / "assets"
+if assets_dir.exists():
+    app.mount("/assets", StaticFiles(directory=assets_dir, html=False), name="frontend-assets")
 
 # =====================================================================
 # CORS 设置
@@ -145,7 +207,7 @@ print("✅ CORS allow_origins =", origins)
 # 添加 CORS 中间件
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -209,6 +271,9 @@ async def startup_event():
     try:
         print("=" * 60)
         print("🚀 矿井视频增强系统启动中...")
+
+        # 关键依赖检查（PyInstaller 环境尤其重要）
+        validate_runtime_dependencies()
 
         # 检查关键组件
         cameras = get_cameras_with_rtsp()
@@ -280,17 +345,28 @@ async def global_exception_handler(request: Request, exc: Exception):
 def spa_fallback(full_path: str):
     """
     SPA 单页应用 fallback：
-    所有非 /api 的请求都返回 index.html
+    - 所有 /api/** 请求保持 404
+    - 先尝试返回真实静态文件
+    - 其他路径统一回落到 index.html
     """
-    # 忽略 API 路径
+
+    # API 请求直接 404 以避免吞掉错误
     if full_path.startswith("api"):
         return JSONResponse({"detail": "API 路径不存在"}, status_code=404)
 
-    # 忽略静态资源目录（资产文件必须走 StaticFiles）
-    if full_path.startswith(("assets", "favicon", "logo", "static", "manifest", "robots")):
-        return JSONResponse({"detail": "静态资源不存在"}, status_code=404)
+    requested_path = (DIST_DIR / full_path.lstrip("/")).resolve()
 
-    index_path = os.path.join(DIST_DIR, "index.html")
+    # 防止越权访问 dist 之外的路径
+    if not str(requested_path).startswith(str(DIST_DIR.resolve())):
+        return JSONResponse({"detail": "路径不允许"}, status_code=403)
+
+    if requested_path.is_file():
+        return FileResponse(requested_path)
+
+    index_path = DIST_DIR / "index.html"
+    if not index_path.exists():
+        return JSONResponse({"detail": "前端入口缺失"}, status_code=500)
+
     return FileResponse(index_path)
 
 

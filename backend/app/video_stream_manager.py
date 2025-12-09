@@ -1,7 +1,7 @@
 ﻿# backend/app/video_stream_manager.py - 视频流管理器
 import logging
 import os
-import signal
+import sys
 import subprocess
 import threading
 import time
@@ -41,6 +41,12 @@ class VideoStreamProcessor:
         self.frame_count = 0
         self.last_fps_time = time.time()
         self.current_fps = 0
+
+        # 运行资源
+        self.proc: Optional[subprocess.Popen] = None
+        self.thread: Optional[threading.Thread] = None
+        self.stderr_thread: Optional[threading.Thread] = None
+        self.stderr_stop = threading.Event()
 
         # 加载 LUT
         self.lut = None
@@ -125,48 +131,6 @@ class VideoStreamProcessor:
         except:
             return False
 
-    def _start_ffmpeg_pipe(self):
-        # 优先级：cuda > dxva2 > 无加速
-        hwaccel_methods = [
-            ("cuda", ["-hwaccel", "cuda", "-hwaccel_device", "0"]),
-            ("dxva2", ["-hwaccel", "dxva2"]),
-            (None, [])  # 无硬件加速
-        ]
-
-        for name, hwaccel_args in hwaccel_methods:
-            cmd = [
-                "ffmpeg",
-                *hwaccel_args,  # 🔧 动态添加硬件加速参数
-
-                  # RTSP 优化参数
-                "-rtsp_transport", "tcp",
-                "-max_delay", "500000",
-                "-reorder_queue_size", "0",
-                "-fflags", "nobuffer+fastseek+flush_packets",
-                "-flags", "low_delay",
-
-                # 输入输出
-                "-i", self.rtsp_url,
-                "-f", "rawvideo",
-                "-pix_fmt", "bgr24",
-                "-s", f"{self.width}x{self.height}",
-                "-vsync", "drop", #  自动丢弃慢帧
-                "-"
-            ]
-
-            try:
-                self.proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,  # 🔧 捕获错误信息
-                    bufsize=10 ** 8
-                )
-                print(f"🎥 FFmpeg 管道已启动: {self.rtsp_url}")
-            except Exception as e:
-                print(f"❌ 启动 FFmpeg 失败: {e}")
-                self.running = False
-                raise
-
     def _restart_ffmpeg(self):
         """重启 FFmpeg 进程"""
         if not self.running:
@@ -176,34 +140,106 @@ class VideoStreamProcessor:
 
         try:
             if self.proc:
-                self.proc.kill()
+                self._terminate_proc()
         except:
             pass
 
         time.sleep(0.2)
         self._start_ffmpeg_pipe()
 
-        # 关闭旧进程
+        def _terminate_proc(self):
+            """安全关闭 FFmpeg 进程和管道，防止句柄泄漏。"""
+
+            proc = getattr(self, "proc", None)
+            if not proc:
+                return
+
         try:
-            if hasattr(self, 'proc') and self.proc:
-                self.proc.terminate()
-                self.proc.wait(timeout=2)
-        except Exception as e:
-            print(f"⚠️ 关闭旧进程失败: {e}")
+            proc.terminate()
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
             try:
-                self.proc.kill()
-            except:
+                proc.kill()
+            except Exception:
                 pass
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        finally:
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe:
+                    try:
+                        pipe.close()
+                    except Exception:
+                        pass
 
-        # 短暂延迟
-        time.sleep(0.5)
+        self.stderr_stop.set()
+        if self.stderr_thread and self.stderr_thread.is_alive():
+            self.stderr_thread.join(timeout=1)
+        self.stderr_thread = None
+        self.proc = None
 
-        # 启动新进程
+    def _drain_stderr(self):
+        """后台读取 stderr 防止缓冲区阻塞。"""
+        if not self.proc or not self.proc.stderr:
+            return
+
+        while not self.stderr_stop.is_set():
+            try:
+                line = self.proc.stderr.readline()
+                if not line:
+                    break
+                logger.debug(f"[FFmpeg:{self.camera_id}] {line.decode(errors='ignore').strip()}")
+            except Exception:
+                break
+
+    def _start_ffmpeg_pipe(self):
+        """启动 FFmpeg 进程并开启 stderr 读取。"""
+        hwaccel_args = []
+        # 检测是否支持 GPU（例如 NVIDIA）
         try:
-            self._start_ffmpeg_pipe()
-            print(f"✅ [{self.camera_id}] FFmpeg 重启成功")
+            # 仅在 Windows 下尝试，避免 Linux 报错
+            if sys.platform == "win32":
+                hwaccel_args = ["-hwaccel", "d3d11va", "-hwaccel_output_format", "d3d11"]
+        except Exception:
+            pass
+
+        cmd = [
+            "ffmpeg",
+            *hwaccel_args,  # 🔧 动态添加硬件加速参数
+
+              # RTSP 优化参数
+            "-rtsp_transport", "tcp",
+            "-max_delay", "500000",
+            "-reorder_queue_size", "0",
+            "-fflags", "nobuffer+fastseek+flush_packets",
+            "-flags", "low_delay",
+
+            # 输入输出
+            "-i", self.rtsp_url,
+            "-f", "rawvideo",
+            "-pix_fmt", "bgr24",
+            "-s", f"{self.width}x{self.height}",
+            "-vsync", "drop", #  自动丢弃慢帧
+            "-"
+        ]
+
+        try:
+            self.proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,  # 🔧 捕获错误信息
+                bufsize=10 ** 8
+            )
+            self.stderr_stop.clear()
+            self.stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+            self.stderr_thread.start()
+            print(f"🎥 FFmpeg 管道已启动: {self.rtsp_url}")
         except Exception as e:
-            print(f"❌ [{self.camera_id}] FFmpeg 重启失败: {e}")
+            print(f"❌ 启动 FFmpeg 失败: {e}")
+            self.running = False
             raise
 
     # =========================================================
@@ -211,11 +247,19 @@ class VideoStreamProcessor:
     # =========================================================
     def _process_frames(self):
         frame_size = self.width * self.height * 3
-        skip_count = 0  # 🔧 添加跳帧计数
+        skip_counter = 0  # 🔧 添加跳帧计数
+        skip_interval = 3
         restart_failures = 0  # 🔧 添加重启计数
+        empty_reads = 0
+        max_empty_reads = 150  # 长时间无帧自动退出
+        max_restart_attempts = 3
 
         while self.running:
             try:
+                if not self.proc or not self.proc.stdout:
+                    time.sleep(0.05)
+                    continue
+
                 raw = self.proc.stdout.read(frame_size)
 
                 if not raw or len(raw) != frame_size:
@@ -223,22 +267,30 @@ class VideoStreamProcessor:
 
                     # 🔧 重启 FFmpeg（如果多次失败）
                     restart_failures += 1
-                    if restart_failures > 3:
+                    empty_reads += 1
+
+                    if empty_reads >= max_empty_reads:
+                        print(f"❌ [{self.camera_id}] 长时间无帧，自动关闭处理器")
+                        self.running = False
+                        break
+
+                    if restart_failures > max_restart_attempts:
                         print(f"❌ [{self.camera_id}] FFmpeg 多次无法获取帧，停止重启！")
                         self.running = False
                         break
 
-                    print(f"🔁 [{self.camera_id}] 重新启动 FFmpeg（尝试 {restart_failures}/3）...")
+                    print(f"🔁 [{self.camera_id}] 重新启动 FFmpeg（尝试 {restart_failures}/{max_restart_attempts}）...")
                     self._restart_ffmpeg()
                     time.sleep(1)
                     continue
 
                     # 解码成功，重置失败计数
                 restart_failures = 0
+                empty_reads = 0
 
-                # 🔧 跳帧策略
-                skip_count += 1
-                if skip_count % 3 != 0:  # 只处理每第 3 帧
+                # 🔧 跳帧策略（动态调整）
+                skip_counter = (skip_counter + 1) % skip_interval
+                if skip_counter != 0:  # 按当前间隔跳帧
                     continue
 
                 frame = np.frombuffer(raw, np.uint8).reshape((self.height, self.width, 3))
@@ -248,9 +300,11 @@ class VideoStreamProcessor:
                 enhanced = self._apply_enhancement(frame)
                 process_time = time.time() - start_time
 
-                # 🔧 如果处理时间过长，增加跳帧率
-                if process_time > 0.05:  # 超过 50ms
-                    print(f"⚠️ [{self.camera_id}] 处理耗时 {process_time:.3f}s，考虑降低分辨率")
+                # 🔧 根据耗时调整跳帧策略
+                if process_time > 0.06 and skip_interval < 6:
+                    skip_interval += 1
+                elif process_time < 0.03 and skip_interval > 2:
+                    skip_interval -= 1
 
                 # 🔧 先复制，再加锁（减少锁持有时间）
                 original_copy = frame.copy()
@@ -394,10 +448,12 @@ class VideoStreamProcessor:
     def stop(self):
         """停止处理器"""
         self.running = False
-        try:
-            self.proc.send_signal(signal.SIGTERM)
-        except:
-            pass
+        self._terminate_proc()
+
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=2)
+        self.thread = None
+
         print(f"🛑 [{self.camera_id}] 视频流处理器已停止")
 
 
