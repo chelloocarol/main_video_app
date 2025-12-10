@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 # backend/app/auth.py - JWT用户认证模块
-import os
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 

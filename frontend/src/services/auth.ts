@@ -2,11 +2,17 @@
 
 import api from './api';
 
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
 /**
  * 用户信息接口定义
  */
 export interface User {
-  id: string;
+  id?: string;
   username: string;
   full_name?: string;
   email?: string;
@@ -48,7 +54,7 @@ export const login = async (
     formData.append('password', password);
 
     // 调用登录接口
-    const response = await api.post<{ access_token: string; token_type: string }>(
+    const response = await api.post<ApiResponse<{ access_token: string; token_type: string; user: User }>>(
       '/api/token',
       formData,
       {
@@ -56,19 +62,18 @@ export const login = async (
       }
     );
 
-    // 保存 token 到 localStorage
-    const { access_token, user } = response.data;
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '登录失败');
+    }
+
+    const { access_token, user } = response.data.data;
     localStorage.setItem('access_token', access_token);
+    localStorage.setItem('user_info', JSON.stringify(user));
 
-    // ✅ 登录后再拉取用户信息
-    const userInfo = await getUserInfo();
-    localStorage.setItem('user_info', JSON.stringify(userInfo));
-
-    // ✅ 构造 LoginResponse 格式（方便调用端兼容）
     return {
       access_token,
       token_type: 'bearer',
-      user: userInfo,
+      user,
     };
   } catch (error: any) {
     console.error('登录失败:', error);
@@ -141,16 +146,20 @@ export const logout = async (): Promise<void> => {
 export const getUserInfo = async (): Promise<User> => {
   try {
     // 调用用户信息接口
-    const response = await api.get<User>('/api/user/me');
+    const response = await api.get<ApiResponse<User>>('/api/user/me');
 
-    // 更新本地缓存的用户信息
+    if (!response.data?.success) {
+      throw new Error(response.data?.message || '获取用户信息失败');
+    }
+
+    const user = response.data.data;
     localStorage.setItem('user_info', JSON.stringify({
-      username: response.data.username,
-      full_name: response.data.full_name,
-      role: response.data.role,
+      username: user.username,
+      full_name: user.full_name,
+      role: user.role,
     }));
 
-    return response.data;
+    return user;
   } catch (error: any) {
     console.error('获取用户信息失败:', error);
 

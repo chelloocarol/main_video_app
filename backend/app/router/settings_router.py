@@ -1,8 +1,11 @@
 # backend/routers/settings_router.py
+import json
+import os
+from typing import Optional, Tuple
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from typing import Optional, Tuple
-import json, os
+
 
 router = APIRouter(prefix="/api/settings", tags=["系统设置"])
 
@@ -59,13 +62,13 @@ def save_settings(settings: SystemSettings):
 # -----------------------------
 # 路由接口定义
 # -----------------------------
-@router.get("/get", response_model=SystemSettings)
+@router.get("/get")
 def get_settings():
     """获取系统设置"""
     return load_settings()
 
 
-@router.post("/update", response_model=SystemSettings)
+@router.post("/update")
 def update_settings(new_settings: dict):
     """更新系统设置"""
     current = load_settings()
@@ -80,12 +83,12 @@ def update_settings(new_settings: dict):
 
     settings_obj = SystemSettings(**updated)
     save_settings(settings_obj)
-    return settings_obj
+    return {"success": True, "data": settings_obj, "message": "系统设置已更新"}
 
 
-@router.post("/reset", response_model=SystemSettings)
+@router.post("/reset")
 def reset_settings():
     """恢复默认设置"""
     default = SystemSettings()
     save_settings(default)
-    return default
+    return {"success": True, "data": default, "message": "系统设置已重置"}

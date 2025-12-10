@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Union
 
-PathType = Union[str, os.PathLike]
+PathType = Union[str, os.PathLike, Path]
 
 # ======================================================
 #   基础路径工具函数（外部配置强制热加载）
@@ -40,9 +40,8 @@ def get_external_data_path(filename: str) -> Path:
 
 def get_external_lut_path(filename: str) -> Path:
     """返回外部 lut 目录下的文件路径"""
-    if getattr(sys, 'frozen', False):
-        return BASE_DIR / "lut" / filename
-    return BASE_DIR / filename
+    lut_dir = BASE_DIR / "lut"
+    return lut_dir / filename
 
 # ======================================================
 #  通用 JSON 加载器（外部优先，内部兜底）
@@ -50,7 +49,7 @@ def get_external_lut_path(filename: str) -> Path:
 
 def load_config_file(external_path: PathType) -> dict:
     """
-    强制从外部路径读取配置，缺失时抛出清晰的诊断错误。
+    强制从外部路径读取配置，缺失时抛出清晰地诊断错误。
     这些文件不会打包进 PyInstaller，必须由运维提供。
     """
 
@@ -111,7 +110,7 @@ def resolve_lut_path(lut_filename: str) -> str:
         return str(external_lut)
 
     # 内置 LUT 路径（相对 app/lut/...）
-    internal_lut = Path(__file__).resolve().parent.parent / lut_filename
+    internal_lut = Path(__file__).resolve().parent.parent / "lut" / lut_filename
 
     print(f"📌 使用内置 LUT 文件：{internal_lut}")
     return str(internal_lut)
