@@ -1,4 +1,5 @@
-﻿# params.py - configuration parameters
+﻿
+# params.py - configuration parameters
 import os
 from typing import Dict, Any, Tuple
 from .camera_config import get_cameras_with_rtsp

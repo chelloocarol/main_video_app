@@ -147,12 +147,12 @@ class VideoStreamProcessor:
         time.sleep(0.2)
         self._start_ffmpeg_pipe()
 
-        def _terminate_proc(self):
-            """安全关闭 FFmpeg 进程和管道，防止句柄泄漏。"""
+    def _terminate_proc(self):
+        """安全关闭 FFmpeg 进程和管道，防止句柄泄漏。"""
 
-            proc = getattr(self, "proc", None)
-            if not proc:
-                return
+        proc = getattr(self, "proc", None)
+        if not proc:
+            return
 
         try:
             proc.terminate()

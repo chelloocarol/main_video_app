@@ -38,6 +38,7 @@
         "name": "6号井口监控",
         "location": "主井口",
         "lut_path": "app/lut/mapping_lut_1.npy",
+
         "status": "online"
     },
     {

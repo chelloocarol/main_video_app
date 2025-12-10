@@ -42,8 +42,12 @@ export const getVideoStreamUrl = async (
 ): Promise<ApiResponse<VideoStreamUrl>> => {
   try {
     const params = cameraId ? { camera_id: cameraId } : {};
-    const response = await api.get<VideoStreamUrl>('/api/video/stream', { params });
-    return { success: true, data: response.data, message: '获取视频流 URL 成功' };
+    const response = await api.get<ApiResponse<VideoStreamUrl>>('/api/video/stream', { params });
+    if (response.data?.success) {
+      return response.data;
+    }
+
+    return { success: false, data: null as any, message: response.data?.message || '获取视频流 URL 失败' };
   } catch (error: any) {
     console.error('获取视频流 URL 失败:', error);
     return {
@@ -62,8 +66,12 @@ export const getEnhancementStatus = async (
 ): Promise<ApiResponse<EnhancementStatus>> => {
   try {
     const params = cameraId ? { camera_id: cameraId } : {};
-    const response = await api.get<EnhancementStatus>('/api/video/status', { params });
-    return { success: true, data: response.data, message: '获取增强状态成功' };
+    const response = await api.get<ApiResponse<EnhancementStatus>>('/api/video/status', { params });
+    if (response.data?.success) {
+      return response.data;
+    }
+
+    return { success: false, data: { is_running: false }, message: response.data?.message || '获取增强状态失败' };
   } catch (error: any) {
     console.error('获取增强状态失败:', error);
     return {

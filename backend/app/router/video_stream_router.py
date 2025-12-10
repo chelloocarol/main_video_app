@@ -12,6 +12,9 @@ from app.config.params import get_enhance_params
 router = APIRouter(prefix="/api/video", tags=["Video"])
 logger = logging.getLogger(__name__)
 
+def success_response(data, message: str = ""):
+    return {"success": True, "data": data, "message": message}
+
 def get_manager(request: Request):
     """从 app.state 获取全局 VideoStreamManager 实例"""
     manager = getattr(request.app.state, "video_manager", None)
@@ -45,14 +48,16 @@ async def get_stream(request: Request, camera_id: str = Query("camera-1")):
     if not camera_info:
         raise HTTPException(status_code=404, detail=f"摄像头 {camera_id} 配置未找到")
 
-    return {
-        "camera_id": camera_id,
-        "camera_name": camera_info.get("name", f"摄像头 {camera_id}"),
-        "camera_location": camera_info.get("location", "未知位置"),
-        "original_stream_url": f"{base_url}/api/video/frame?camera_id={camera_id}&type=raw",
-        "enhanced_stream_url": f"{base_url}/api/video/frame?camera_id={camera_id}&type=enhanced"
-    }
-
+    return success_response(
+        {
+            "camera_id": camera_id,
+            "camera_name": camera_info.get("name", f"摄像头 {camera_id}"),
+            "camera_location": camera_info.get("location", "未知位置"),
+            "original_stream_url": f"{base_url}/api/video/frame?camera_id={camera_id}&type=raw",
+            "enhanced_stream_url": f"{base_url}/api/video/frame?camera_id={camera_id}&type=enhanced",
+        },
+        "获取视频流地址成功",
+    )
 
 @router.get("/frame")
 async def get_frame(request: Request, camera_id: str = Query("camera-1"), type: str = Query("enhanced")):
@@ -172,12 +177,15 @@ async def get_status(request: Request, camera_id: str = Query("camera-1")):
         # 获取当前增强参数
         current_params = get_enhance_params()
 
-        return {
-            "is_running": is_running,
-            "camera_id": camera_id,
-            "fps": round(fps, 2),
-            "params": current_params if is_running else None,
-        }
+        return success_response(
+            {
+                "is_running": is_running,
+                "camera_id": camera_id,
+                "fps": round(fps, 2),
+                "params": current_params if is_running else None,
+            },
+            "获取增强状态成功",
+        )
 
     except Exception as e:
         logger.error(f"❌ 处理摄像头状态请求时出错: {e}")
@@ -193,17 +201,10 @@ async def start_enhancement(
         clahe_clip_limit: float = None
 ):
     """
-    启动视频增强
-
-    Args:
-        camera_id: 摄像头ID
-        lut_strength: LUT 强度（可选）
-        gamma: Gamma 值（可选）
-        clahe_clip_limit: CLAHE 对比度限制（可选）
+    启动视频增强（兼容接口）：增强默认始终开启，仅支持参数热更新。
     """
     manager = get_manager(request)
 
-    # 更新增强参数（如果提供）
     if any([lut_strength, gamma, clahe_clip_limit]):
         from app.config.params import update_enhance_params
         update_enhance_params(
@@ -212,36 +213,37 @@ async def start_enhancement(
             clahe_clip_limit=clahe_clip_limit
         )
 
-    # 检查处理器是否存在
     processor = manager.get_processor(camera_id)
-    if processor:
-        return {
-            "is_running": True,
-            "camera_id": camera_id,
-            "fps": round(processor.get_fps(), 2),
-            "message": f"视频流 {camera_id} 已启动"
-        }
-    else:
+    if not processor:
         raise HTTPException(status_code=404, detail=f"摄像头 {camera_id} 未注册")
 
+    return success_response(
+        {
+            "is_running": True,
+            "camera_id": camera_id,
+            "fps": round(manager.get_fps(camera_id), 2),
+        },
+        "视频增强默认已开启，start 接口仅用于兼容与参数更新",
+    )
 
 @router.post("/stop")
 async def stop_enhancement(request: Request, camera_id: str = Query("camera-1")):
     """
-    停止视频增强
-
-    Args:
-        camera_id: 摄像头ID
+    停止视频增强（兼容接口）：增强默认开启，不再实际关闭。
     """
     manager = get_manager(request)
-    manager.stop_processor(camera_id)
+    processor = manager.get_processor(camera_id)
+    if not processor:
+        raise HTTPException(status_code=404, detail=f"摄像头 {camera_id} 未注册")
 
-    return {
-        "is_running": False,
-        "camera_id": camera_id,
-        "message": f"视频流 {camera_id} 已停止"
-    }
-
+    return success_response(
+        {
+            "is_running": True,
+            "camera_id": camera_id,
+            "fps": round(manager.get_fps(camera_id), 2),
+        },
+        "视频增强始终开启，stop 接口仅返回兼容状态",
+    )
 
 @router.post("/update_params")
 async def update_params(
@@ -283,21 +285,19 @@ async def update_params(
     if params_dict:
         manager.update_enhance_params(camera_id=camera_id, params=params_dict)
 
-    return {
-        "message": "参数更新成功",
-        "camera_id": camera_id or "all",
-        "params": get_enhance_params()
-    }
+    return success_response(
+        {
+            "camera_id": camera_id or "all",
+            "params": get_enhance_params()
+        },
+        "参数更新成功",
+    )
 
 
 @router.get("/test")
 async def test_route():
     """测试路由是否工作"""
-    return {
-        "message": "Video router is working!",
-        "timestamp": time.time()
-    }
-
+    return success_response({"timestamp": time.time()}, "Video router is working!")
 
 @router.get("/fps/{camera_id}")
 async def get_camera_fps(request: Request, camera_id: str):
@@ -313,7 +313,4 @@ async def get_camera_fps(request: Request, camera_id: str):
     manager = get_manager(request)
     fps = manager.get_fps(camera_id)
 
-    return {
-        "camera_id": camera_id,
-        "fps": round(fps, 2)
-    }
+    return success_response({"camera_id": camera_id, "fps": round(fps, 2)}, "获取 FPS 成功")

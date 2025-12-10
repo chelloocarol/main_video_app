@@ -88,8 +88,23 @@ export const getCameraList = async (): Promise<Camera[]> => {
  */
 export const getCameraById = async (cameraId: string): Promise<Camera> => {
   try {
-    const response = await api.get<Camera>(`/api/cameras/${cameraId}`);
-    return response.data;
+    const cameras = await getCameraList();
+    const baseInfo = cameras.find(cam => cam.camera_id === cameraId);
+
+    if (!baseInfo) {
+      throw new Error('摄像头不存在');
+    }
+
+    try {
+      const statusResp = await api.get<ApiResponse<Camera>>(`/api/cameras/${cameraId}/status`);
+      if (statusResp.data?.success && statusResp.data.data) {
+        return { ...baseInfo, status: statusResp.data.data.status };
+      }
+    } catch (statusError) {
+      console.warn(`获取摄像头 ${cameraId} 状态失败，返回基础信息:`, statusError);
+    }
+
+    return baseInfo;
   } catch (error: any) {
     console.error(`获取摄像头 ${cameraId} 信息失败:`, error);
 
@@ -118,10 +133,15 @@ export const getCameraById = async (cameraId: string): Promise<Camera> => {
  */
 export const getCameraStream = async (cameraId: string): Promise<CameraStream> => {
   try {
-    const response = await api.get<CameraStream>('/api/video/stream', {
+    const response = await api.get<ApiResponse<CameraStream>>('/api/video/stream', {
       params: { camera_id: cameraId },
     });
-    return response.data;
+
+    if (response.data?.success) {
+      return response.data.data;
+    }
+
+    throw new Error(response.data?.message || '获取视频流失败');
   } catch (error: any) {
     console.error(`获取摄像头 ${cameraId} 视频流失败:`, error);
     throw new Error(error.response?.data?.detail || '获取视频流失败');
@@ -146,10 +166,15 @@ export const getCameraStream = async (cameraId: string): Promise<CameraStream> =
  */
 export const startEnhancement = async (cameraId: string): Promise<EnhancementStatus> => {
   try {
-    const response = await api.post<EnhancementStatus>('/api/video/start', null, {
+    const response = await api.post<ApiResponse<EnhancementStatus>>('/api/video/start', null, {
       params: { camera_id: cameraId },
     });
-    return response.data;
+
+    if (response.data?.success) {
+      return response.data.data;
+    }
+
+    throw new Error(response.data?.message || '启动视频增强失败');
   } catch (error: any) {
     console.error(`启动摄像头 ${cameraId} 增强失败:`, error);
 
@@ -179,10 +204,15 @@ export const startEnhancement = async (cameraId: string): Promise<EnhancementSta
  */
 export const stopEnhancement = async (cameraId: string): Promise<EnhancementStatus> => {
   try {
-    const response = await api.post<EnhancementStatus>('/api/video/stop', null, {
+    const response = await api.post<ApiResponse<EnhancementStatus>>('/api/video/stop', null, {
       params: { camera_id: cameraId },
     });
-    return response.data;
+
+    if (response.data?.success) {
+      return response.data.data;
+    }
+
+    throw new Error(response.data?.message || '停止视频增强失败');
   } catch (error: any) {
     console.error(`停止摄像头 ${cameraId} 增强失败:`, error);
 
@@ -208,10 +238,15 @@ export const stopEnhancement = async (cameraId: string): Promise<EnhancementStat
  */
 export const getEnhancementStatus = async (cameraId: string): Promise<EnhancementStatus> => {
   try {
-    const response = await api.get<EnhancementStatus>('/api/video/status', {
+    const response = await api.get<ApiResponse<EnhancementStatus>>('/api/video/status', {
       params: { camera_id: cameraId },
     });
-    return response.data;
+
+    if (response.data?.success) {
+      return response.data.data;
+    }
+
+    throw new Error(response.data?.message || '获取增强状态失败');
   } catch (error: any) {
     console.error(`获取摄像头 ${cameraId} 增强状态失败:`, error);
     throw new Error(error.response?.data?.detail || '获取增强状态失败');
@@ -234,18 +269,23 @@ export const getCamerasStatus = async (
   cameraIds: string[]
 ): Promise<Map<string, 'online' | 'offline'>> => {
   try {
-    // 并发请求所有摄像头信息
-    const promises = cameraIds.map(id => getCameraById(id).catch(() => null));
-    const cameras = await Promise.all(promises);
-
     const statusMap = new Map<string, 'online' | 'offline'>();
-    cameras.forEach((camera, index) => {
-      if (camera) {
-        statusMap.set(camera.camera_id, camera.status);
-      } else {
-        statusMap.set(cameraIds[index], 'offline');
-      }
-    });
+
+    await Promise.all(
+      cameraIds.map(async id => {
+        try {
+          const response = await api.get<ApiResponse<Camera>>(`/api/cameras/${id}/status`);
+          if (response.data?.success && response.data.data) {
+            statusMap.set(id, response.data.data.status);
+            return;
+          }
+        } catch (error) {
+          console.warn(`获取摄像头 ${id} 状态失败:`, error);
+        }
+
+        statusMap.set(id, 'offline');
+      })
+    );
 
     return statusMap;
   } catch (error: any) {
