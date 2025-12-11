@@ -1,4 +1,6 @@
 ﻿# backend/app/main.py
+from typing import Optional
+
 print("🧩 main.py 启动中...")
 import asyncio
 import traceback
@@ -17,8 +19,75 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
+def _read_env_file(env_path: Path):
+    """读取 .env 文件并检测常见错误。
+
+    - 返回 True 表示文件已成功加载
+    - 返回 False 表示检测到错误，应尝试下一个候选路径
+    """
+
+    try:
+        text = env_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        print(f"❌ .env 编码无效（必须为 UTF-8）：{env_path}")
+        return False
+    except Exception as exc:  # pragma: no cover - 仅保护文件 I/O
+        print(f"❌ 无法读取 .env 文件 {env_path}: {exc}")
+        return False
+
+    invalid_lines = []
+    for idx, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            invalid_lines.append(idx)
+
+    if invalid_lines:
+        print(f"⚠️ .env 语法错误（缺少 '='）: {env_path}，问题行: {invalid_lines}")
+        return False
+
+    load_dotenv(env_path)
+    print(f"✅ 已加载 .env 文件: {env_path}")
+    return True
+
+
+def load_env_files(candidate_paths: Optional[list[Path]] = None):
+    """加载 .env 文件并在缺失或错误时给出明确提示。
+
+    - 优先 EXE 同级（_MEIPASS 解压目录旁）
+    - 回退项目根（开发 & 测试）
+    - 兜底当前工作目录
+    - 语法/编码错误会记录并尝试下一个候选
+    """
+
+    candidates = [] if candidate_paths is None else list(candidate_paths)
+    seen = set()
+
+    if not candidates:
+        exe_dir = Path(sys.executable).resolve().parent
+        project_root = Path(__file__).resolve().parent.parent.parent
+
+        if getattr(sys, "frozen", False):
+            candidates.append(exe_dir / ".env")
+        candidates.append(project_root / ".env")
+        candidates.append(Path.cwd() / ".env")
+
+    for env_path in candidates:
+        resolved = env_path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+
+        if resolved.exists():
+            if _read_env_file(resolved):
+                break
+    else:
+        print("⚠️ 未找到 .env 文件，将使用默认环境变量")
+
+
 # 加载环境变量
-load_dotenv()
+load_env_files()
 
 def debug_environment():
     print("========== 环境自检开始 ==========")
@@ -147,26 +216,36 @@ def resolve_dist_path() -> Path:
 
     raise RuntimeError("前端 dist 目录不存在，请确认已构建前端或在 PyInstaller 包内包含资源。")
 
+def _import_cv2():
+    import cv2  # noqa: F401
+    return cv2
 
-def validate_runtime_dependencies(raise_on_missing: bool = True):
-    """在启动前校验关键依赖，缺失时可选择中止启动（默认）。"""
+
+def validate_runtime_dependencies(raise_on_missing: bool = False):
+    """在启动前校验关键依赖。
+
+    - 默认仅告警不中止（便于打包自检与测试）
+    - 设置 REQUIRE_RUNTIME_DEPENDENCIES=1 可强制报错
+    """
+
+    strict = raise_on_missing or os.getenv("REQUIRE_RUNTIME_DEPENDENCIES", "0") == "1"
 
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         message = "❌ 未找到 ffmpeg，可执行文件缺失将导致视频管道无法启动。"
         print(message)
-        if raise_on_missing:
+        if strict:
             raise RuntimeError(message)
     else:
         print(f"✅ ffmpeg 路径: {ffmpeg_path}")
 
     try:
-        import cv2  # noqa: F401
+        _import_cv2()
         print("✅ OpenCV 模块可用")
     except Exception as exc:  # pragma: no cover - 仅启动检查
         message = f"❌ OpenCV 加载失败: {exc}"
         print(message)
-        if raise_on_missing:
+        if strict:
             raise RuntimeError(message)
 
 

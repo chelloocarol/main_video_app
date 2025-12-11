@@ -1,7 +1,10 @@
 ﻿# Python venv（虚拟环境）
+.venv/
 videoapp/
 venv/
-.env/
+
+# Environment Variables File
+.env
 
 # PyInstaller 打包产物
 dist/
@@ -29,3 +32,6 @@ system_build/
 # 前端依赖
 frontend/node_modules/
 node_modules/
+
+# PyCharm project files
+.idea/

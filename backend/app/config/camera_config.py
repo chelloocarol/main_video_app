@@ -63,6 +63,10 @@ def load_config_file(external_path: PathType) -> dict:
         print(f"📌 使用外部配置文件: {resolved_path}")
         with resolved_path.open("r", encoding="utf-8") as f:
             return json.load(f)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"读取外部配置失败: {resolved_path}: JSON 格式错误（行 {exc.lineno}, 列 {exc.colno}）"
+        ) from exc
     except Exception as exc:
         raise RuntimeError(f"读取外部配置失败: {resolved_path}: {exc}") from exc
 
@@ -121,9 +125,17 @@ def resolve_lut_path(lut_filename: str) -> str:
 
 def get_cameras_with_rtsp():
     """整合 camera_info.json 与 rtsp.json，并解析 LUT 路径"""
-    base_info = load_camera_info()
-    rtsp_map = load_rtsp_config()
+    try:
+        base_info = load_camera_info()
+    except Exception as exc:
+        print(f"❌ 摄像头配置加载失败: {exc}")
+        base_info = []
 
+    try:
+        rtsp_map = load_rtsp_config()
+    except Exception as exc:
+        print(f"❌ RTSP 配置加载失败: {exc}")
+        rtsp_map = {}
     cameras = []
 
     for cam in base_info:
