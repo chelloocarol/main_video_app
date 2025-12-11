@@ -85,7 +85,7 @@ const Input: React.FC<InputProps> = ({
         />
 
         {type === 'password' && (
-          <PasswordToggle onClick={togglePasswordVisibility}>
+          <PasswordToggle type="button" onClick={togglePasswordVisibility}>
             {showPassword ? '👁️' : '👁️‍🗨️'}
           </PasswordToggle>
         )}

@@ -276,7 +276,12 @@ if ENV == "development":
 else:
     # 生产模式：只允许配置的来源
     frontend_urls = os.getenv("FRONTEND_URLS", "http://localhost:5173")
-    origins = [url.strip() for url in frontend_urls.split(",")]
+    origins = [url.strip() for url in frontend_urls.split(",") if url.strip()]
+
+# 确保本地调试/EXE 同源地址可用，防止前端请求指向客户端 localhost 时被 CORS 拦截
+for fallback_origin in ("http://localhost:8000", "http://127.0.0.1:8000"):
+    if fallback_origin not in origins:
+        origins.append(fallback_origin)
 
 print("=" * 60)
 print("✅ 加载的 FRONTEND_URLS:", os.getenv("FRONTEND_URLS"))
@@ -320,6 +325,7 @@ from app.router import (
 print("✅ 所有路由模块导入成功")
 
 # 导入视频管理与配置
+from app import auth
 from app.video_stream_manager import VideoStreamManager
 from app.config.camera_config import get_cameras_with_rtsp
 
@@ -357,6 +363,10 @@ async def startup_event():
         # 检查关键组件
         cameras = get_cameras_with_rtsp()
         print(f"📡 已加载 {len(cameras)} 个摄像头配置")
+
+        # 预加载用户信息以确保外部 data/users.json 可用
+        users = auth.load_users()
+        print(f"🔐 已加载 {len(users)} 个用户条目")
 
         # 初始化视频管理器
         video_manager = VideoStreamManager()

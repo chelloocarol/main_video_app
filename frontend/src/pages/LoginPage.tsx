@@ -1,12 +1,12 @@
 /// frontend/src/pages/LoginPage.tsx
 
 import { useUserStore } from '../store/userStore';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { theme } from '../styles/theme';
 import { LoginForm } from '../components';
-import { login, isAuthenticated } from '../services/auth';
+
 
 /**
  * 登录页面

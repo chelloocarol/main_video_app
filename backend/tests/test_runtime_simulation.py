@@ -8,6 +8,7 @@ import numpy as np
 
 import pytest
 from fastapi.testclient import TestClient
+import json
 
 # 确保可以 import app.*
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +115,15 @@ def install_cv2_stub():
 
     sys.modules["cv2"] = Cv2Stub()
     return Cv2Stub
+
+
+def build_exe_layout(tmp_path: Path):
+    exe_dir = tmp_path / "video_backend"
+    frontend_dist = exe_dir / "_internal" / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True, exist_ok=True)
+    (frontend_dist / "index.html").write_text("<html>spa</html>", encoding="utf-8")
+    (frontend_dist / "assets").mkdir(parents=True, exist_ok=True)
+    return exe_dir, frontend_dist
 
 
 @pytest.fixture()
@@ -285,3 +295,56 @@ class TestMeipassSimulation:
         main = reload_main(monkeypatch, dist_structure, frozen=True)
         assert main.DIST_DIR == dist_structure
         assert os.getenv("FRONTEND_URLS") == "http://example.com"
+
+
+class TestAuthUsers:
+    def test_missing_users_file_returns_unauthorized(self, tmp_path, monkeypatch):
+        exe_dir, frontend_dist = build_exe_layout(tmp_path)
+        main = reload_main(
+            monkeypatch,
+            exe_dir,
+            frozen=True,
+            extra_env={"FRONTEND_DIST": str(frontend_dist)},
+        )
+        client = TestClient(main.app)
+
+        resp = client.post(
+            "/api/token", data={"username": "admin", "password": "123456"}
+        )
+        assert resp.status_code == 401
+
+    def test_login_with_external_users_json(self, tmp_path, monkeypatch):
+        exe_dir, frontend_dist = build_exe_layout(tmp_path)
+        data_dir = exe_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        user_payload = {
+            "admin": {
+                "user_id": 1,
+                "username": "admin",
+                "full_name": "系统管理员",
+                "email": "admin@example.com",
+                "hashed_password": "$2b$12$aYEk4QVByErUYzODNHbdjuMSmMUAGk312VTOiTE2Vx3w2vyzTaTry",
+                "role": "admin",
+                "disabled": False,
+            }
+        }
+        (data_dir / "users.json").write_text(
+            json.dumps(user_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        main = reload_main(
+            monkeypatch,
+            exe_dir,
+            frozen=True,
+            extra_env={"FRONTEND_DIST": str(frontend_dist)},
+        )
+        client = TestClient(main.app)
+
+        resp = client.post(
+            "/api/token", data={"username": "admin", "password": "123456"}
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["data"]["user"]["username"] == "admin"

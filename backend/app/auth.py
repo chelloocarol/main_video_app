@@ -1,6 +1,5 @@
 ﻿# -*- coding: utf-8 -*-
 # backend/app/auth.py - JWT用户认证模块
-import json
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -11,14 +10,16 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
+from app.config import camera_config
+
 # ============================================================================
 # 配置项
 # ============================================================================
 
 # JWT 密钥（生产环境必须从环境变量读取）
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production-09a8f7b6c5d4e3f2")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30  # Token 有效期（分钟）
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # Token 有效期（分钟）
 
 # 密码哈希配置
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -26,9 +27,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # HTTP Bearer 认证（用于依赖注入）
 bearer_scheme = HTTPBearer()
 
-# JSON 用户文件路径
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-USER_FILE = os.path.join(BASE_DIR, "data", "users.json")
+# JSON 用户文件路径（始终指向外部 data/users.json）
+USER_FILE = camera_config.get_external_data_path("users.json")
 
 # ============================================================================
 # Pydantic 数据模型
@@ -53,13 +53,19 @@ class UserInDB(User):
 # =====================================================
 
 def load_users() -> Dict[str, Any]:
-    """从JSON文件加载用户"""
-    print(f"[DEBUG] 尝试加载用户文件: {USER_FILE}")
+    """从外部 JSON 文件加载用户，缺失或解析错误时给出诊断并返回空集。"""
 
-    if not os.path.exists(USER_FILE):
-        raise FileNotFoundError(f"用户文件未找到: {USER_FILE}")
-    with open(USER_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    resolved_path = USER_FILE
+    print(f"🔐 正在加载用户文件: {resolved_path}")
+
+    try:
+        return camera_config.load_config_file(resolved_path)
+    except FileNotFoundError as exc:
+        print(f"⚠️ 用户文件未找到: {exc}")
+    except Exception as exc:  # pragma: no cover - 保护运行时 I/O
+        print(f"❌ 用户文件加载失败: {exc}")
+
+    return {}
 
 def get_user(username: str) -> Optional[UserInDB]:
     """从JSON加载并获取用户"""
@@ -70,7 +76,23 @@ def get_user(username: str) -> Optional[UserInDB]:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证密码"""
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except ValueError as exc:
+        print(f"❌ 密码校验失败: {exc}")
+    except Exception as exc:  # pragma: no cover - 保护运行时的 bcrypt 后端异常
+        print(f"❌ 密码校验异常: {exc}")
+
+    # 尝试使用裸 bcrypt 作为兼容方案，避免打包环境缺少 __about__ 等元信息时直接崩溃
+    try:
+        import bcrypt  # type: ignore
+
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+        )
+    except Exception as exc:  # pragma: no cover - 兜底保护
+        print(f"❌ bcrypt 兼容校验失败: {exc}")
+        return False
 
 def get_password_hash(password: str) -> str:
     """生成密码哈希（初始化用户时使用）"""

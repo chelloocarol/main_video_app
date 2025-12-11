@@ -3,13 +3,47 @@
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 
+const resolveBaseURL = (): string => {
+  const normalize = (url: string) => url.replace(/\/+$/, '');
+  const envUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  const origin = typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : '';
+
+  // 1) 显式配置优先，但如果指向客户端 localhost/127 且当前页面并非该主机，则改用同源
+  if (envUrl) {
+    try {
+      const env = new URL(envUrl);
+      if (origin) {
+        const current = new URL(origin);
+        const envIsLoopback = ['localhost', '127.0.0.1'].includes(env.hostname);
+        if (envIsLoopback && env.hostname !== current.hostname) {
+          return normalize(origin);
+        }
+      }
+      return normalize(env.toString());
+    } catch (err) {
+      console.warn('⚠️ VITE_API_BASE_URL 无效，改用同源:', envUrl, err);
+    }
+  }
+
+  // 2) 默认同源，确保 EXE/生产环境不跑到客户端本机
+  if (origin) {
+    return normalize(origin);
+  }
+
+  // 3) 兜底（主要用于单元测试环境）
+  return 'http://localhost:8000';
+};
+
 /**
  * 创建 Axios 实例
  * 通过环境变量控制 baseURL
  */
 const api: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
-  timeout: 10000,
+  baseURL: resolveBaseURL(),
+  // 适度延长超时，避免网络抖动导致 axios 主动取消请求
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },

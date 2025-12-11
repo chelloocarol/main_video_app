@@ -78,7 +78,7 @@ const PublicRoute: React.FC = () => {
  */
 const AppInitializer: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isInitialized, setIsInitialized] = useState(false);
-  const isLoading = useUserStore((state) => state.isLoading);
+  const [initLoading, setInitLoading] = useState(true);
 
   useEffect(() => {
     // 🔧 修复：直接调用 store 的 initialize 方法，避免依赖函数引用
@@ -89,6 +89,7 @@ const AppInitializer: React.FC<{ children: React.ReactNode }> = ({ children }) =
         console.error('应用初始化失败:', error);
       } finally {
         setIsInitialized(true);
+        setInitLoading(false);
       }
     };
 
@@ -96,7 +97,7 @@ const AppInitializer: React.FC<{ children: React.ReactNode }> = ({ children }) =
   }, []); // 👈 空依赖数组，只执行一次
 
   // 初始化中显示加载动画
-  if (!isInitialized || isLoading) {
+  if (!isInitialized || initLoading) {
     return <Loading fullscreen text="初始化应用中..." />;
   }
 
